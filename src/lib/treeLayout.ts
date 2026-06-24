@@ -7,7 +7,8 @@ const VERTICAL_GAP = 170;
 export function buildFlowElements(
   nodes: TreeNodeData[],
   edges: Array<{ id: string; source: string; target: string; data?: { label?: string; weight?: number } }>,
-  onUpdate?: (id: string, data: Partial<TreeNodeData>) => void
+  onUpdate?: (id: string, data: Partial<TreeNodeData>) => void,
+  onComplete?: (id: string, label: string) => void
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const children: Record<string, string[]> = {};
   const parents: Record<string, string[]> = {};
@@ -61,7 +62,7 @@ export function buildFlowElements(
     id: n.id,
     type: "treeNode",
     position: positions[n.id] ?? { x: 0, y: 0 },
-    data: { ...n, onUpdate },
+    data: { ...n, onUpdate, onComplete },
   }));
 
   const flowEdges: Edge[] = edges.map((e) => ({

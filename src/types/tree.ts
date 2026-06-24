@@ -11,6 +11,7 @@ export interface TreeNodeData {
   status: NodeStatus;
   isRoot?: boolean;
   onUpdate?: (id: string, data: Partial<TreeNodeData>) => void;
+  onComplete?: (id: string, label: string) => void;
 }
 
 export interface TreeEdgeData {

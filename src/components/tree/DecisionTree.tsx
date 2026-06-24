@@ -21,11 +21,12 @@ const nodeTypes = { treeNode: TreeNode };
 interface Props {
   tree: LifeTree;
   onNodeUpdate: (nodeId: string, data: Partial<TreeNodeData>) => void;
+  onNodeComplete: (nodeId: string, label: string) => void;
 }
 
-export function DecisionTree({ tree, onNodeUpdate }: Props) {
+export function DecisionTree({ tree, onNodeUpdate, onNodeComplete }: Props) {
   const { flowNodes: initialNodes, flowEdges: initialEdges } = useMemo(
-    () => buildFlowElements(tree.nodes, tree.edges, onNodeUpdate),
+    () => buildFlowElements(tree.nodes, tree.edges, onNodeUpdate, onNodeComplete),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tree.updatedAt]
   );
@@ -34,7 +35,7 @@ export function DecisionTree({ tree, onNodeUpdate }: Props) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
   useEffect(() => {
-    const { flowNodes, flowEdges } = buildFlowElements(tree.nodes, tree.edges, onNodeUpdate);
+    const { flowNodes, flowEdges } = buildFlowElements(tree.nodes, tree.edges, onNodeUpdate, onNodeComplete);
     setNodes(flowNodes);
     setEdges(flowEdges);
   // eslint-disable-next-line react-hooks/exhaustive-deps

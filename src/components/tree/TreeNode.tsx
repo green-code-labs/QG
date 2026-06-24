@@ -208,6 +208,25 @@ export const TreeNode = memo(({ data, selected }: NodeProps<TreeNodeData>) => {
         <Handle type="target" position={Position.Left} className="!bg-border !border-none !w-1.5 !h-1.5" />
         <Handle type="source" position={Position.Right} className="!bg-border !border-none !w-1.5 !h-1.5" />
 
+        {/* Complete button */}
+        <button
+          className={cn(
+            "absolute -top-2.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all z-10 shadow-sm",
+            data.status === "completed"
+              ? "bg-emerald-500 border-emerald-500 opacity-100"
+              : "bg-background border-border opacity-0 group-hover:opacity-100 hover:border-emerald-400"
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (data.status !== "completed") {
+              data.onComplete?.(data.id, data.label);
+            }
+          }}
+          title={data.status === "completed" ? "Concluído" : "Marcar como concluído"}
+        >
+          {data.status === "completed" && <Check className="w-3 h-3 text-white" />}
+        </button>
+
         {/* Edit button */}
         <button
           className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md bg-background/50 hover:bg-background border border-border/50 z-10"

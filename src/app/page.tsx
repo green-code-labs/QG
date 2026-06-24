@@ -289,6 +289,25 @@ export default function Home() {
     });
   }
 
+  function handleNodeComplete(nodeId: string, label: string) {
+    if (!user) return;
+    // Immediately mark as completed in the tree
+    setTree((prev) => {
+      if (!prev) return prev;
+      const updated: LifeTree = {
+        ...prev,
+        nodes: prev.nodes.map((n) =>
+          n.id === nodeId ? { ...n, status: "completed" as const } : n
+        ),
+        updatedAt: new Date().toISOString(),
+      };
+      if (activeId) persist(activeId, messages, updated);
+      return updated;
+    });
+    // Trigger AI to re-evaluate the tree
+    sendMessage(`Concluí: "${label}". Atualize a árvore considerando essa conquista — ajuste probabilidades, desbloqueie novos caminhos e sugira próximos passos.`);
+  }
+
   function resetChat() {
     setActiveId(null); setMessages([]); setTree(null);
     setPendingImages([]); setPendingFiles([]); setError(null);
@@ -438,7 +457,7 @@ export default function Home() {
               </div>
             </div>
             <div className="absolute top-3 right-3 z-10"><Legend /></div>
-            <DecisionTree key={tree.updatedAt} tree={tree} onNodeUpdate={handleNodeUpdate} />
+            <DecisionTree key={tree.updatedAt} tree={tree} onNodeUpdate={handleNodeUpdate} onNodeComplete={handleNodeComplete} />
           </>
         ) : (
           <EmptyTreeState />
