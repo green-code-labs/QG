@@ -32,11 +32,19 @@ export interface LifeTree {
   updatedAt: string;
 }
 
+export interface FileAttachment {
+  name: string;
+  mimeType: string;
+  data: string;     // base64 for PDF, raw text for text files
+  size: number;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  images?: string[];
+  images?: string[];   // base64 data URLs
+  files?: FileAttachment[];
   timestamp: string;
 }
 
@@ -55,4 +63,9 @@ export interface Conversation {
   tree?: LifeTree;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AppStore {
+  folders: Folder[];
+  conversations: Conversation[];
 }

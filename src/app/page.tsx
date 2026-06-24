@@ -1,46 +1,59 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useSession } from "next-auth/react";
-import { Message, LifeTree, TreeNodeData, Conversation, Folder } from "@/types/tree";
+import {
+  Message, LifeTree, TreeNodeData,
+  Conversation, Folder, FileAttachment,
+} from "@/types/tree";
+import { storage } from "@/lib/storage";
 import { DecisionTree } from "@/components/tree/DecisionTree";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
 import {
-  Send,
-  Loader2,
-  GitBranch,
-  Sparkles,
-  RotateCcw,
-  User,
-  Bot,
-  Image as ImageIcon,
-  X,
+  Send, Loader2, GitBranch, Sparkles,
+  RotateCcw, User, Bot, Paperclip, X,
+  FileText, FileCode2, File,
 } from "lucide-react";
 
-const PLACEHOLDER_PROMPTS = [
+const EXAMPLES = [
   "Sou dev com 3 anos de exp. Quero entrar em IA ou empreender. Me ajude a mapear os caminhos.",
   "Acabei de receber uma proposta de emprego melhor. Como isso muda minha árvore?",
   "Quero ser freelancer em 1 ano. Quais são meus próximos passos?",
 ];
 
-const SAVE_DEBOUNCE_MS = 1500;
+// File types accepted
+const ACCEPT = [
+  "image/*",
+  "application/pdf",
+  ".txt", ".md", ".csv", ".json",
+  ".js", ".ts", ".jsx", ".tsx", ".py", ".java",
+  ".go", ".rs", ".rb", ".php", ".sh", ".yaml", ".yml",
+].join(",");
+
+const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml"];
+
+function isTextFile(mimeType: string) {
+  return TEXT_MIME_PREFIXES.some((p) => mimeType.startsWith(p));
+}
+
+function fileIcon(mimeType: string) {
+  if (mimeType.startsWith("image/")) return null;
+  if (mimeType.includes("pdf")) return FileText;
+  if (mimeType.startsWith("text/") || mimeType.includes("json")) return FileCode2;
+  return File;
+}
 
 export default function Home() {
-  const { data: session } = useSession();
-  const userId = (session?.user as { id?: string })?.id;
-
-  // Sidebar state
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
   const [tree, setTree] = useState<LifeTree | null>(null);
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<FileAttachment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,17 +62,16 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load sidebar data on login
+  // Bootstrap from localStorage
   useEffect(() => {
-    if (!userId) return;
-    Promise.all([
-      fetch("/api/folders").then((r) => r.json()),
-      fetch("/api/conversations").then((r) => r.json()),
-    ]).then(([foldersData, convosData]) => {
-      setFolders(Array.isArray(foldersData) ? foldersData : []);
-      setConversations(Array.isArray(convosData) ? convosData : []);
-    });
-  }, [userId]);
+    const s = storage.getAll();
+    setFolders(s.folders);
+    setConversations(
+      [...s.conversations].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )
+    );
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -73,133 +85,117 @@ export default function Home() {
     }
   }, [input]);
 
-  // Auto-save conversation
-  const saveConversation = useCallback(
-    (convId: string, msgs: Message[], t: LifeTree | null, title?: string) => {
-      if (!userId || !convId) return;
+  const persistConversation = useCallback(
+    (id: string, msgs: Message[], t: LifeTree | null, title?: string) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        fetch(`/api/conversations/${convId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: msgs, tree: t, title }),
-        })
-          .then((r) => r.json())
-          .then((updated) => {
-            setConversations((prev) =>
-              prev.map((c) => (c.id === convId ? { ...c, ...updated } : c))
-            );
-          });
-      }, SAVE_DEBOUNCE_MS);
+        storage.saveMessages(id, msgs, t, title);
+        setConversations(storage.getConversations());
+      }, 800);
     },
-    [userId]
+    []
   );
 
-  async function selectConversation(id: string) {
-    setActiveConvId(id);
-    const res = await fetch(`/api/conversations/${id}`);
-    const data: Conversation = await res.json();
-    setMessages(data.messages ?? []);
-    setTree(data.tree ?? null);
+  function selectConversation(id: string) {
+    const c = storage.getConversation(id);
+    if (!c) return;
+    setActiveId(id);
+    setMessages(c.messages ?? []);
+    setTree(c.tree ?? null);
     setPendingImages([]);
+    setPendingFiles([]);
     setError(null);
   }
 
-  async function newConversation(folderId?: string) {
-    if (!userId) {
-      // Local mode: just reset
-      setActiveConvId(null);
-      setMessages([]);
-      setTree(null);
-      setPendingImages([]);
-      return;
-    }
-    const res = await fetch("/api/conversations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "Nova conversa", folderId }),
-    });
-    const convo: Conversation = await res.json();
-    setConversations((prev) => [convo, ...prev]);
-    setActiveConvId(convo.id);
+  function newConversation(folderId?: string) {
+    const c = storage.createConversation("Nova conversa", folderId);
+    setConversations(storage.getConversations());
+    setActiveId(c.id);
     setMessages([]);
     setTree(null);
     setPendingImages([]);
+    setPendingFiles([]);
     setError(null);
   }
 
-  async function deleteConversation(id: string) {
-    if (!userId) return;
-    await fetch(`/api/conversations/${id}`, { method: "DELETE" });
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (activeConvId === id) {
-      setActiveConvId(null);
+  function deleteConversation(id: string) {
+    storage.deleteConversation(id);
+    setConversations(storage.getConversations());
+    if (activeId === id) {
+      setActiveId(null);
       setMessages([]);
       setTree(null);
     }
   }
 
-  async function createFolder(name: string, emoji: string) {
-    if (!userId) return;
-    const res = await fetch("/api/folders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, emoji }),
-    });
-    const folder: Folder = await res.json();
-    setFolders((prev) => [...prev, folder]);
+  function createFolder(name: string, emoji: string) {
+    const f = storage.createFolder(name, emoji);
+    setFolders(storage.getFolders());
+    return f;
   }
 
-  async function deleteFolder(id: string) {
-    if (!userId) return;
-    await fetch(`/api/folders/${id}`, { method: "DELETE" });
-    setFolders((prev) => prev.filter((f) => f.id !== id));
-    setConversations((prev) =>
-      prev.map((c) => (c.folderId === id ? { ...c, folderId: undefined } : c))
-    );
+  function deleteFolder(id: string) {
+    storage.deleteFolder(id);
+    setFolders(storage.getFolders());
+    setConversations(storage.getConversations());
   }
 
-  async function moveConversation(convId: string, folderId?: string) {
-    if (!userId) return;
-    await fetch(`/api/conversations/${convId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId: folderId ?? null }),
-    });
-    setConversations((prev) =>
-      prev.map((c) => (c.id === convId ? { ...c, folderId } : c))
-    );
+  function moveConversation(convId: string, folderId?: string) {
+    storage.moveConversation(convId, folderId);
+    setConversations(storage.getConversations());
   }
 
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // ---- File / image attachment ----
+  async function handleAttachment(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        if (ev.target?.result) {
-          setPendingImages((prev) => [...prev, ev.target!.result as string]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
     if (fileInputRef.current) fileInputRef.current.value = "";
+
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        // Images → data URL for inline preview + vision
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (ev.target?.result)
+            setPendingImages((p) => [...p, ev.target!.result as string]);
+        };
+        reader.readAsDataURL(file);
+      } else if (file.type === "application/pdf") {
+        // PDF → base64 (strip data URL prefix)
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (!ev.target?.result) return;
+          const dataUrl = ev.target.result as string;
+          const base64 = dataUrl.split(",")[1];
+          setPendingFiles((p) => [
+            ...p,
+            { name: file.name, mimeType: file.type, data: base64, size: file.size },
+          ]);
+        };
+        reader.readAsDataURL(file);
+      } else if (isTextFile(file.type) || file.name.match(/\.(txt|md|csv|json|js|ts|jsx|tsx|py|java|go|rs|rb|php|sh|yaml|yml)$/i)) {
+        // Text files → read as plain text
+        const text = await file.text();
+        setPendingFiles((p) => [
+          ...p,
+          { name: file.name, mimeType: file.type || "text/plain", data: text, size: file.size },
+        ]);
+      }
+    }
   }
 
+  // ---- Send ----
   async function sendMessage(content: string) {
-    if ((!content.trim() && pendingImages.length === 0) || isLoading) return;
+    const hasAttachments = pendingImages.length > 0 || pendingFiles.length > 0;
+    if (!content.trim() && !hasAttachments) return;
+    if (isLoading) return;
 
-    // Create conversation on first message if not exists
-    let convId = activeConvId;
-    if (!convId && userId) {
-      const res = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: content.slice(0, 50) || "Nova conversa" }),
-      });
-      const convo: Conversation = await res.json();
-      setConversations((prev) => [convo, ...prev]);
-      setActiveConvId(convo.id);
-      convId = convo.id;
+    // Ensure conversation exists
+    let convId = activeId;
+    if (!convId) {
+      const c = storage.createConversation(content.slice(0, 60) || "Nova conversa");
+      setConversations(storage.getConversations());
+      setActiveId(c.id);
+      convId = c.id;
     }
 
     const userMsg: Message = {
@@ -207,6 +203,7 @@ export default function Home() {
       role: "user",
       content: content.trim(),
       images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+      files: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
       timestamp: new Date().toISOString(),
     };
 
@@ -214,6 +211,7 @@ export default function Home() {
     setMessages(newMessages);
     setInput("");
     setPendingImages([]);
+    setPendingFiles([]);
     setIsLoading(true);
     setError(null);
 
@@ -223,11 +221,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: newMessages, currentTree: tree }),
       });
-
       if (!res.ok) throw new Error("API error");
 
       const data = await res.json();
-
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -243,16 +239,12 @@ export default function Home() {
       setMessages(finalMessages);
       if (data.tree) setTree(finalTree);
 
-      // Auto-save
-      if (convId) {
-        const title =
-          finalMessages.find((m) => m.role === "user")?.content.slice(0, 60) ??
-          "Conversa";
-        saveConversation(convId, finalMessages, finalTree, title);
-      }
-    } catch (e) {
+      const title =
+        finalMessages.find((m) => m.role === "user")?.content?.slice(0, 60) ||
+        "Conversa";
+      persistConversation(convId, finalMessages, finalTree, title);
+    } catch {
       setError("Algo deu errado. Tente novamente.");
-      console.error(e);
     } finally {
       setIsLoading(false);
     }
@@ -265,14 +257,6 @@ export default function Home() {
     }
   }
 
-  function resetChat() {
-    setActiveConvId(null);
-    setMessages([]);
-    setTree(null);
-    setPendingImages([]);
-    setError(null);
-  }
-
   function handleNodeUpdate(nodeId: string, data: Partial<TreeNodeData>) {
     setTree((prev) => {
       if (!prev) return prev;
@@ -281,45 +265,55 @@ export default function Home() {
         nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, ...data } : n)),
         updatedAt: new Date().toISOString(),
       };
-      if (activeConvId) saveConversation(activeConvId, messages, updated);
+      if (activeId) persistConversation(activeId, messages, updated);
       return updated;
     });
   }
 
+  function resetChat() {
+    setActiveId(null);
+    setMessages([]);
+    setTree(null);
+    setPendingImages([]);
+    setPendingFiles([]);
+    setError(null);
+  }
+
+  const hasPending = pendingImages.length > 0 || pendingFiles.length > 0;
+  const convTitle = conversations.find((c) => c.id === activeId)?.title ?? "Chat";
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Sidebar */}
-      <div className="w-[220px] shrink-0 border-r border-border flex flex-col">
+      <div className="w-[220px] shrink-0 border-r border-border">
         <Sidebar
           conversations={conversations}
           folders={folders}
-          activeId={activeConvId}
+          activeId={activeId}
           onSelect={selectConversation}
-          onNewConversation={newConversation}
-          onDeleteConversation={deleteConversation}
+          onNew={newConversation}
+          onDelete={deleteConversation}
           onCreateFolder={createFolder}
           onDeleteFolder={deleteFolder}
-          onMoveConversation={moveConversation}
+          onMove={moveConversation}
         />
       </div>
 
-      {/* Chat Panel */}
+      {/* Chat panel */}
       <div className="w-[380px] shrink-0 flex flex-col border-r border-border">
-        {/* Chat Header */}
+        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-primary" />
-            <span className="text-sm font-semibold text-foreground">
-              {conversations.find((c) => c.id === activeConvId)?.title ?? "Chat"}
-            </span>
+          <div className="flex items-center gap-2 min-w-0">
+            <GitBranch className="w-4 h-4 text-primary shrink-0" />
+            <span className="text-sm font-semibold text-foreground truncate">{convTitle}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <ThemeToggle />
             {messages.length > 0 && (
               <button
                 onClick={resetChat}
                 className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-                title="Nova conversa"
+                title="Reiniciar"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
@@ -332,31 +326,29 @@ export default function Home() {
           {messages.length === 0 ? (
             <EmptyState onSelect={sendMessage} />
           ) : (
-            messages.map((msg) => <ChatBubble key={msg.id} message={msg} />)
+            messages.map((m) => <ChatBubble key={m.id} message={m} />)
           )}
           {isLoading && <TypingIndicator />}
           {error && (
-            <div className="text-[12px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 rounded-lg px-3 py-2">
+            <div className="text-[12px] text-red-500 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 rounded-lg px-3 py-2">
               {error}
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Image previews */}
-        {pendingImages.length > 0 && (
-          <div className="px-3 flex gap-2 flex-wrap pb-1">
+        {/* Pending attachments preview */}
+        {hasPending && (
+          <div className="px-3 pb-1 flex gap-2 flex-wrap">
             {pendingImages.map((img, i) => (
-              <div key={i} className="relative">
+              <div key={`img-${i}`} className="relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={img} alt="" className="w-14 h-14 rounded-lg object-cover border border-border" />
-                <button
-                  onClick={() => setPendingImages((p) => p.filter((_, idx) => idx !== i))}
-                  className="absolute -top-1 -right-1 w-4 h-4 bg-background border border-border rounded-full flex items-center justify-center"
-                >
-                  <X className="w-2.5 h-2.5 text-foreground" />
-                </button>
+                <RemoveBtn onClick={() => setPendingImages((p) => p.filter((_, idx) => idx !== i))} />
               </div>
+            ))}
+            {pendingFiles.map((f, i) => (
+              <FileChip key={`file-${i}`} file={f} onRemove={() => setPendingFiles((p) => p.filter((_, idx) => idx !== i))} />
             ))}
           </div>
         )}
@@ -367,53 +359,49 @@ export default function Home() {
             <button
               onClick={() => fileInputRef.current?.click()}
               className="p-1 text-muted-foreground hover:text-foreground transition-colors shrink-0"
-              title="Adicionar imagem"
+              title="Adicionar arquivo ou imagem"
               disabled={isLoading}
             >
-              <ImageIcon className="w-4 h-4" />
+              <Paperclip className="w-4 h-4" />
             </button>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={ACCEPT}
               multiple
               className="hidden"
-              onChange={handleImageUpload}
+              onChange={handleAttachment}
             />
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Descreva sua situação ou nova oportunidade..."
+              placeholder="Descreva sua situação, envie um arquivo..."
               rows={1}
               className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed"
               disabled={isLoading}
             />
             <button
               onClick={() => sendMessage(input)}
-              disabled={(!input.trim() && pendingImages.length === 0) || isLoading}
+              disabled={(!input.trim() && !hasPending) || isLoading}
               className={cn(
                 "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all",
-                (input.trim() || pendingImages.length > 0) && !isLoading
+                (input.trim() || hasPending) && !isLoading
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >
-              {isLoading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Send className="w-3.5 h-3.5" />
-              )}
+              {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
             </button>
           </div>
-          <p className="text-[10px] text-muted-foreground mt-1 text-center">
-            Enter para enviar · Shift+Enter nova linha · 📎 imagens suportadas
+          <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+            Enter para enviar · Shift+Enter nova linha · 📎 imagens, PDF, código
           </p>
         </div>
       </div>
 
-      {/* Tree Panel */}
+      {/* Tree panel */}
       <div className="flex-1 relative">
         {tree ? (
           <>
@@ -426,16 +414,40 @@ export default function Home() {
             <div className="absolute top-3 right-3 z-10">
               <Legend />
             </div>
-            <DecisionTree
-              key={tree.updatedAt}
-              tree={tree}
-              onNodeUpdate={handleNodeUpdate}
-            />
+            <DecisionTree key={tree.updatedAt} tree={tree} onNodeUpdate={handleNodeUpdate} />
           </>
         ) : (
           <EmptyTreeState />
         )}
       </div>
+    </div>
+  );
+}
+
+/* ---- Sub-components ---- */
+
+function RemoveBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="absolute -top-1 -right-1 w-4 h-4 bg-background border border-border rounded-full flex items-center justify-center hover:bg-secondary"
+    >
+      <X className="w-2.5 h-2.5 text-foreground" />
+    </button>
+  );
+}
+
+function FileChip({ file, onRemove }: { file: FileAttachment; onRemove: () => void }) {
+  const Icon = fileIcon(file.mimeType) ?? FileText;
+  const sizeKb = (file.size / 1024).toFixed(0);
+  return (
+    <div className="relative flex items-center gap-1.5 bg-secondary border border-border rounded-lg px-2 py-1.5 max-w-[140px]">
+      <Icon className="w-4 h-4 text-primary shrink-0" />
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium text-foreground truncate">{file.name}</p>
+        <p className="text-[10px] text-muted-foreground">{sizeKb} KB</p>
+      </div>
+      <RemoveBtn onClick={onRemove} />
     </div>
   );
 }
@@ -450,26 +462,37 @@ function ChatBubble({ message }: { message: Message }) {
           isUser ? "bg-primary/20" : "bg-secondary"
         )}
       >
-        {isUser ? (
-          <User className="w-3 h-3 text-primary" />
-        ) : (
-          <Bot className="w-3 h-3 text-muted-foreground" />
-        )}
+        {isUser ? <User className="w-3 h-3 text-primary" /> : <Bot className="w-3 h-3 text-muted-foreground" />}
       </div>
       <div
         className={cn(
-          "rounded-xl px-3 py-2 text-[13px] leading-relaxed max-w-[260px] space-y-1.5",
+          "rounded-xl px-3 py-2 text-[13px] leading-relaxed max-w-[260px] space-y-2",
           isUser
             ? "bg-primary/10 text-foreground border border-primary/20"
             : "bg-secondary text-foreground border border-border"
         )}
       >
+        {/* Image previews */}
         {message.images && message.images.length > 0 && (
           <div className="flex gap-1.5 flex-wrap">
             {message.images.map((img, i) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img key={i} src={img} alt="" className="w-20 h-20 rounded-lg object-cover" />
             ))}
+          </div>
+        )}
+        {/* File chips */}
+        {message.files && message.files.length > 0 && (
+          <div className="flex gap-1.5 flex-wrap">
+            {message.files.map((f, i) => {
+              const Icon = fileIcon(f.mimeType) ?? FileText;
+              return (
+                <div key={i} className="flex items-center gap-1.5 bg-background/60 border border-border rounded-lg px-2 py-1">
+                  <Icon className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-[11px] text-foreground truncate max-w-[100px]">{f.name}</span>
+                </div>
+              );
+            })}
           </div>
         )}
         {message.content && <p>{message.content}</p>}
@@ -513,7 +536,7 @@ function EmptyState({ onSelect }: { onSelect: (s: string) => void }) {
         <p className="text-[10px] text-muted-foreground uppercase tracking-wider text-center mb-2">
           Exemplos
         </p>
-        {PLACEHOLDER_PROMPTS.map((prompt, i) => (
+        {EXAMPLES.map((prompt, i) => (
           <button
             key={i}
             onClick={() => onSelect(prompt)}
@@ -536,7 +559,7 @@ function EmptyTreeState() {
       <div>
         <h3 className="text-sm font-semibold text-foreground">Sua árvore aparecerá aqui</h3>
         <p className="text-[12px] text-muted-foreground mt-1 max-w-[280px] leading-relaxed">
-          Inicie uma conversa. A IA gera e atualiza sua árvore de decisão automaticamente.
+          Inicie uma conversa ou envie um arquivo. A IA gera e atualiza sua árvore automaticamente.
         </p>
       </div>
       <Legend />
