@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SessionUser } from "@/lib/storage";
+import { clientAuth } from "@/lib/clientAuth";
 import { GitBranch, Loader2, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,27 +27,13 @@ export function AuthScreen({ onLogin }: Props) {
     setLoading(true);
 
     try {
-      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const body = mode === "login"
-        ? { email, password }
-        : { name, email, password };
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error ?? "Algo deu errado.");
-        return;
-      }
-
-      onLogin(data as SessionUser);
-    } catch {
-      setError("Erro de conexão.");
+      const user =
+        mode === "login"
+          ? await clientAuth.login(email, password)
+          : await clientAuth.register(name, email, password);
+      onLogin(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Algo deu errado.");
     } finally {
       setLoading(false);
     }
