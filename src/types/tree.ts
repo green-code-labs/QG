@@ -4,12 +4,13 @@ export interface TreeNodeData {
   id: string;
   label: string;
   description?: string;
-  probability?: number; // 0-100
+  probability?: number;
+  probabilityReasoning?: string;
   timeframe?: string;
   actions?: string[];
   status: NodeStatus;
   isRoot?: boolean;
-  scenarioType?: "conservative" | "aggressive" | "pivot" | "pessimistic";
+  onUpdate?: (id: string, data: Partial<TreeNodeData>) => void;
 }
 
 export interface TreeEdgeData {
@@ -35,11 +36,23 @@ export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  images?: string[];
   timestamp: string;
 }
 
-export interface ChatState {
+export interface Folder {
+  id: string;
+  name: string;
+  emoji: string;
+  createdAt: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  folderId?: string;
   messages: Message[];
-  tree: LifeTree | null;
-  isLoading: boolean;
+  tree?: LifeTree;
+  createdAt: string;
+  updatedAt: string;
 }

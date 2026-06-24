@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
+import { Message } from "@/types/tree";
 
 const client = new Anthropic();
 
@@ -11,6 +12,7 @@ REGRAS CRÍTICAS:
 3. O "tree" é a árvore COMPLETA atualizada (não apenas delta).
 4. Preserve IDs existentes quando atualizar nós — só crie novos IDs para novos nós.
 5. Quando o usuário mencionar uma nova oportunidade, evento ou mudança, atualize pesos e probabilidades.
+6. Para cada nó, inclua "probabilityReasoning" explicando a lógica por trás do número (ex: "70% porque o usuário tem 3 anos de experiência relevante, mas ainda precisa de certificação").
 
 ESTRUTURA DO JSON DE SAÍDA (sempre exatamente isso):
 {
@@ -24,8 +26,9 @@ ESTRUTURA DO JSON DE SAÍDA (sempre exatamente isso):
         "label": "Nome curto",
         "description": "Descrição do nó",
         "probability": 75,
+        "probabilityReasoning": "75% pois X tem Y habilidades mas ainda precisa de Z...",
         "timeframe": "6-12 meses",
-        "actions": ["Ação 1", "Ação 2"],
+        "actions": ["Ação 1", "Ação 2", "Ação 3"],
         "status": "active",
         "isRoot": true
       }
@@ -46,34 +49,57 @@ ESTRUTURA DO JSON DE SAÍDA (sempre exatamente isso):
 CAMPOS DOS NÓS:
 - status: "active" (em andamento), "completed" (concluído), "blocked" (bloqueado), "opportunity" (nova oportunidade)
 - probability: 0-100 (chance de sucesso nesse caminho)
+- probabilityReasoning: explicação de 1-2 frases do cálculo ponderado
 - isRoot: true apenas para o nó raiz (situação atual)
-- actions: lista de próximos passos concretos
+- actions: lista de 2-4 próximos passos concretos e acionáveis
 
 FILOSOFIA:
 - Pense como Random Forest: múltiplos caminhos paralelos, não um único caminho linear
 - Inclua nós de "no-regret moves" (ações que valem em qualquer cenário)
 - Quando um novo evento aparecer, atualize probabilidades e adicione novos galhos
-- Mantenha a árvore enxuta mas informativa (máx ~15 nós para não sobrecarregar)
+- Mantenha a árvore enxuta mas informativa (máx ~15 nós)
+- Se o usuário enviar imagens, analise-as e incorpore as informações na árvore
 
 Responda SOMENTE com JSON válido. Nada antes ou depois do JSON.`;
+
+type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+
+function buildAnthropicMessages(messages: Message[], currentTree: unknown): Anthropic.MessageParam[] {
+  return messages.map((m, idx) => {
+    const isLast = idx === messages.length - 1;
+    const treeContext =
+      isLast && currentTree
+        ? `\n\nÁRVORE ATUAL (JSON):\n${JSON.stringify(currentTree, null, 2)}`
+        : "";
+
+    if (m.role === "user" && m.images && m.images.length > 0) {
+      const content: Anthropic.ContentBlockParam[] = m.images.map((img) => {
+        const [header, data] = img.split(",");
+        const rawType = header.match(/data:([^;]+)/)?.[1] ?? "image/jpeg";
+        const mediaType: ImageMediaType =
+          ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(rawType)
+            ? (rawType as ImageMediaType)
+            : "image/jpeg";
+        return {
+          type: "image" as const,
+          source: { type: "base64" as const, media_type: mediaType, data },
+        };
+      });
+      content.push({ type: "text", text: m.content + treeContext });
+      return { role: "user" as const, content };
+    }
+
+    return {
+      role: m.role as "user" | "assistant",
+      content: isLast ? m.content + treeContext : m.content,
+    };
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
     const { messages, currentTree } = await req.json();
-
-    const contextMessage = currentTree
-      ? `\n\nÁRVORE ATUAL (JSON):\n${JSON.stringify(currentTree, null, 2)}`
-      : "";
-
-    const anthropicMessages = messages.map(
-      (m: { role: string; content: string }) => ({
-        role: m.role as "user" | "assistant",
-        content:
-          m.role === "user" && messages.indexOf(m) === messages.length - 1
-            ? m.content + contextMessage
-            : m.content,
-      })
-    );
+    const anthropicMessages = buildAnthropicMessages(messages, currentTree);
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -85,22 +111,15 @@ export async function POST(req: NextRequest) {
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
 
-    // Extract JSON — handle cases where model wraps in ```json
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "Invalid response from AI" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Invalid AI response" }, { status: 500 });
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
     return NextResponse.json(parsed);
   } catch (err) {
     console.error(err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -4,22 +4,56 @@
 
 @layer base {
   :root {
-    --background: 0 0% 3.9%;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+    --border: 0 0% 89%;
+    --input: 0 0% 89%;
+    --primary: 142 71% 38%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 142 71% 38%;
+    --accent-foreground: 0 0% 98%;
+    --ring: 142 71% 38%;
+    --radius: 0.5rem;
+    --node-active-bg: 210 100% 97%;
+    --node-active-border: 210 100% 85%;
+    --node-completed-bg: 142 71% 96%;
+    --node-completed-border: 142 71% 80%;
+    --node-blocked-bg: 0 84% 97%;
+    --node-blocked-border: 0 84% 85%;
+    --node-opportunity-bg: 43 96% 96%;
+    --node-opportunity-border: 43 96% 80%;
+  }
+
+  .dark {
+    --background: 0 0% 4%;
     --foreground: 0 0% 98%;
     --card: 0 0% 6%;
     --card-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
     --primary: 142 76% 48%;
-    --primary-foreground: 0 0% 3.9%;
-    --secondary: 0 0% 12%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 10%;
     --secondary-foreground: 0 0% 98%;
     --muted: 0 0% 10%;
     --muted-foreground: 0 0% 55%;
     --accent: 142 76% 48%;
-    --accent-foreground: 0 0% 3.9%;
+    --accent-foreground: 0 0% 4%;
     --ring: 142 76% 48%;
-    --radius: 0.5rem;
+    --node-active-bg: 210 100% 10%;
+    --node-active-border: 210 100% 20%;
+    --node-completed-bg: 142 76% 8%;
+    --node-completed-border: 142 76% 20%;
+    --node-blocked-bg: 0 84% 8%;
+    --node-blocked-border: 0 84% 20%;
+    --node-opportunity-bg: 43 96% 8%;
+    --node-opportunity-border: 43 96% 20%;
   }
 }
 
@@ -33,10 +67,8 @@
   }
 }
 
-/* ReactFlow overrides */
-.react-flow__renderer {
-  background: transparent;
-}
+/* ReactFlow */
+.react-flow__renderer { background: transparent; }
 .react-flow__edge-path {
   stroke: hsl(var(--border));
   stroke-width: 1.5;
@@ -56,20 +88,27 @@
   border-color: hsl(var(--border)) !important;
   color: hsl(var(--foreground)) !important;
 }
+.react-flow__controls button svg { fill: hsl(var(--foreground)); }
 .react-flow__minimap {
   background: hsl(var(--card)) !important;
   border: 1px solid hsl(var(--border)) !important;
   border-radius: 6px !important;
 }
+.react-flow__attribution { display: none; }
 
 /* Scrollbar */
-::-webkit-scrollbar {
-  width: 4px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--border));
   border-radius: 2px;
 }
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
