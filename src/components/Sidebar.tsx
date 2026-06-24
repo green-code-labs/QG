@@ -12,9 +12,12 @@ import {
   Check,
   X,
   GitBranch,
+  LogOut,
 } from "lucide-react";
+import { SessionUser } from "@/lib/storage";
 
 interface Props {
+  user: SessionUser;
   conversations: Conversation[];
   folders: Folder[];
   activeId: string | null;
@@ -24,9 +27,11 @@ interface Props {
   onCreateFolder: (name: string, emoji: string) => void;
   onDeleteFolder: (id: string) => void;
   onMove: (convId: string, folderId?: string) => void;
+  onLogout: () => void;
 }
 
 export function Sidebar({
+  user,
   conversations,
   folders,
   activeId,
@@ -36,6 +41,7 @@ export function Sidebar({
   onCreateFolder,
   onDeleteFolder,
   onMove,
+  onLogout,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -222,6 +228,26 @@ export function Sidebar({
               onDragStart={() => setDragging(c.id)}
             />
           ))}
+        </div>
+      </div>
+
+      {/* User footer */}
+      <div className="px-3 py-3 border-t border-border">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0 text-[11px] font-bold text-primary">
+            {user.name[0]?.toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-medium text-foreground truncate">{user.name}</p>
+            <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
+          </div>
+          <button
+            onClick={onLogout}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0"
+            title="Sair"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     </div>

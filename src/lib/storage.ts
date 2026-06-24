@@ -1,42 +1,72 @@
 import { AppStore, Conversation, Folder, LifeTree, Message } from "@/types/tree";
 
-const KEY = "qg_store";
+const SESSION_KEY = "qg_session";
 
-function load(): AppStore {
+export interface SessionUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
+function storeKey(userId: string) {
+  return `qg_store_${userId}`;
+}
+
+// ---- Session ----
+export const session = {
+  get(): SessionUser | null {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  },
+  set(user: SessionUser) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  },
+  clear() {
+    localStorage.removeItem(SESSION_KEY);
+  },
+};
+
+// ---- Per-user data ----
+function load(userId: string): AppStore {
   if (typeof window === "undefined") return { folders: [], conversations: [] };
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(storeKey(userId));
     return raw ? JSON.parse(raw) : { folders: [], conversations: [] };
   } catch {
     return { folders: [], conversations: [] };
   }
 }
 
-function save(store: AppStore) {
-  localStorage.setItem(KEY, JSON.stringify(store));
+function save(userId: string, store: AppStore) {
+  localStorage.setItem(storeKey(userId), JSON.stringify(store));
 }
 
 export const storage = {
-  getAll(): AppStore {
-    return load();
+  getAll(userId: string): AppStore {
+    return load(userId);
   },
 
-  getFolders(): Folder[] {
-    return load().folders;
+  getFolders(userId: string): Folder[] {
+    return load(userId).folders;
   },
 
-  getConversations(): Conversation[] {
-    return load().conversations.sort(
+  getConversations(userId: string): Conversation[] {
+    return load(userId).conversations.sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
   },
 
-  getConversation(id: string): Conversation | null {
-    return load().conversations.find((c) => c.id === id) ?? null;
+  getConversation(userId: string, id: string): Conversation | null {
+    return load(userId).conversations.find((c) => c.id === id) ?? null;
   },
 
-  createFolder(name: string, emoji: string): Folder {
-    const store = load();
+  createFolder(userId: string, name: string, emoji: string): Folder {
+    const store = load(userId);
     const folder: Folder = {
       id: `folder-${Date.now()}`,
       name,
@@ -44,30 +74,21 @@ export const storage = {
       createdAt: new Date().toISOString(),
     };
     store.folders.push(folder);
-    save(store);
+    save(userId, store);
     return folder;
   },
 
-  updateFolder(id: string, data: Partial<Folder>): Folder | null {
-    const store = load();
-    const idx = store.folders.findIndex((f) => f.id === id);
-    if (idx === -1) return null;
-    store.folders[idx] = { ...store.folders[idx], ...data };
-    save(store);
-    return store.folders[idx];
-  },
-
-  deleteFolder(id: string) {
-    const store = load();
+  deleteFolder(userId: string, id: string) {
+    const store = load(userId);
     store.folders = store.folders.filter((f) => f.id !== id);
     store.conversations = store.conversations.map((c) =>
       c.folderId === id ? { ...c, folderId: undefined } : c
     );
-    save(store);
+    save(userId, store);
   },
 
-  createConversation(title: string, folderId?: string): Conversation {
-    const store = load();
+  createConversation(userId: string, title: string, folderId?: string): Conversation {
+    const store = load(userId);
     const now = new Date().toISOString();
     const convo: Conversation = {
       id: `conv-${Date.now()}`,
@@ -78,37 +99,41 @@ export const storage = {
       updatedAt: now,
     };
     store.conversations.unshift(convo);
-    save(store);
+    save(userId, store);
     return convo;
   },
 
-  updateConversation(
+  saveMessages(
+    userId: string,
     id: string,
-    data: Partial<Pick<Conversation, "title" | "folderId" | "messages" | "tree">>
-  ): Conversation | null {
-    const store = load();
+    messages: Message[],
+    tree: LifeTree | null,
+    title?: string
+  ) {
+    const store = load(userId);
     const idx = store.conversations.findIndex((c) => c.id === id);
-    if (idx === -1) return null;
+    if (idx === -1) return;
     store.conversations[idx] = {
       ...store.conversations[idx],
-      ...data,
+      messages,
+      tree: tree ?? undefined,
+      ...(title ? { title } : {}),
       updatedAt: new Date().toISOString(),
     };
-    save(store);
-    return store.conversations[idx];
+    save(userId, store);
   },
 
-  saveMessages(id: string, messages: Message[], tree: LifeTree | null, title?: string) {
-    this.updateConversation(id, { messages, tree: tree ?? undefined, title });
-  },
-
-  deleteConversation(id: string) {
-    const store = load();
+  deleteConversation(userId: string, id: string) {
+    const store = load(userId);
     store.conversations = store.conversations.filter((c) => c.id !== id);
-    save(store);
+    save(userId, store);
   },
 
-  moveConversation(id: string, folderId?: string) {
-    this.updateConversation(id, { folderId });
+  moveConversation(userId: string, convId: string, folderId?: string) {
+    const store = load(userId);
+    const idx = store.conversations.findIndex((c) => c.id === convId);
+    if (idx === -1) return;
+    store.conversations[idx] = { ...store.conversations[idx], folderId, updatedAt: new Date().toISOString() };
+    save(userId, store);
   },
 };
